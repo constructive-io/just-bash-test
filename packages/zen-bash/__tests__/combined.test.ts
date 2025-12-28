@@ -1,119 +1,113 @@
 import { Bash } from 'just-bash';
 import { fs as zenfs, InMemory, configure } from '@zenfs/core';
+import { ZenFsAdapter } from '../src/ZenFsAdapter';
 
-describe('zen-bash: combining just-bash with zen-fs', () => {
-  describe('using just-bash VirtualFs (default)', () => {
-    it('executes bash commands with built-in virtual filesystem', async () => {
-      const bash = new Bash();
-      await bash.exec('echo "hello from just-bash" > /tmp/test.txt');
-      const result = await bash.exec('cat /tmp/test.txt');
-      expect(result.stdout).toBe('hello from just-bash\n');
+describe('zen-bash: just-bash with zen-fs filesystem', () => {
+  let adapter: ZenFsAdapter;
+
+  beforeEach(async () => {
+    await configure({ mounts: { '/': InMemory } });
+    adapter = new ZenFsAdapter();
+    zenfs.mkdirSync('/tmp', { recursive: true });
+    zenfs.mkdirSync('/home', { recursive: true });
+  });
+
+  describe('just-bash operating on zen-fs filesystem via adapter', () => {
+    it('writes a file via just-bash, reads it via zen-fs', async () => {
+      const bash = new Bash({ fs: adapter });
+
+      await bash.exec('echo "hello from bash" > /tmp/test.txt');
+
+      const content = zenfs.readFileSync('/tmp/test.txt', 'utf-8');
+      expect(content).toBe('hello from bash\n');
     });
 
-    it('supports complex file operations', async () => {
-      const bash = new Bash();
-      await bash.exec('mkdir -p /tmp/project/src');
-      await bash.exec('echo "console.log(42)" > /tmp/project/src/index.js');
-      await bash.exec('cp /tmp/project/src/index.js /tmp/project/src/backup.js');
-      const result = await bash.exec('cat /tmp/project/src/backup.js');
-      expect(result.stdout).toBe('console.log(42)\n');
+    it('creates directories via just-bash, verifies via zen-fs', async () => {
+      const bash = new Bash({ fs: adapter });
+
+      await bash.exec('mkdir -p /home/user/projects/myapp');
+      await bash.exec('echo "# My App" > /home/user/projects/myapp/README.md');
+
+      expect(zenfs.existsSync('/home/user/projects/myapp')).toBe(true);
+      expect(zenfs.existsSync('/home/user/projects/myapp/README.md')).toBe(true);
+      expect(zenfs.readFileSync('/home/user/projects/myapp/README.md', 'utf-8')).toBe('# My App\n');
+    });
+
+    it('appends to a file via just-bash, verifies via zen-fs', async () => {
+      const bash = new Bash({ fs: adapter });
+
+      await bash.exec('echo "line1" > /tmp/log.txt');
+      await bash.exec('echo "line2" >> /tmp/log.txt');
+      await bash.exec('echo "line3" >> /tmp/log.txt');
+
+      const content = zenfs.readFileSync('/tmp/log.txt', 'utf-8');
+      expect(content).toBe('line1\nline2\nline3\n');
+    });
+
+    it('copies files via just-bash, verifies via zen-fs', async () => {
+      const bash = new Bash({ fs: adapter });
+
+      await bash.exec('echo "original content" > /tmp/original.txt');
+      await bash.exec('cp /tmp/original.txt /tmp/copy.txt');
+
+      expect(zenfs.existsSync('/tmp/copy.txt')).toBe(true);
+      expect(zenfs.readFileSync('/tmp/copy.txt', 'utf-8')).toBe('original content\n');
+    });
+
+    it('moves files via just-bash, verifies via zen-fs', async () => {
+      const bash = new Bash({ fs: adapter });
+
+      await bash.exec('echo "movable content" > /tmp/source.txt');
+      await bash.exec('mv /tmp/source.txt /tmp/destination.txt');
+
+      expect(zenfs.existsSync('/tmp/source.txt')).toBe(false);
+      expect(zenfs.existsSync('/tmp/destination.txt')).toBe(true);
+      expect(zenfs.readFileSync('/tmp/destination.txt', 'utf-8')).toBe('movable content\n');
+    });
+
+    it('removes files via just-bash, verifies via zen-fs', async () => {
+      const bash = new Bash({ fs: adapter });
+
+      await bash.exec('echo "temporary" > /tmp/temp.txt');
+      expect(zenfs.existsSync('/tmp/temp.txt')).toBe(true);
+
+      await bash.exec('rm /tmp/temp.txt');
+      expect(zenfs.existsSync('/tmp/temp.txt')).toBe(false);
     });
   });
 
-  describe('using zen-fs InMemory backend', () => {
-    beforeEach(async () => {
-      await configure({ mounts: { '/': InMemory } });
+  describe('bidirectional file operations', () => {
+    it('zen-fs writes, just-bash reads and processes', async () => {
+      zenfs.writeFileSync('/tmp/data.csv', 'name,age\nAlice,30\nBob,25\nCharlie,35');
+
+      const bash = new Bash({ fs: adapter });
+      const result = await bash.exec('cat /tmp/data.csv | grep -c ","');
+
+      expect(result.stdout.trim()).toBe('4');
     });
 
-    it('performs file operations with zen-fs', async () => {
-      zenfs.writeFileSync('/data.txt', 'zen-fs content');
-      const content = zenfs.readFileSync('/data.txt', 'utf-8');
-      expect(content).toBe('zen-fs content');
+    it('just-bash processes, zen-fs stores result', async () => {
+      zenfs.writeFileSync('/tmp/numbers.txt', '10\n20\n30\n40\n50\n');
+
+      const bash = new Bash({ fs: adapter });
+      await bash.exec('cat /tmp/numbers.txt | wc -l > /tmp/count.txt');
+
+      const count = zenfs.readFileSync('/tmp/count.txt', 'utf-8');
+      expect(count.trim()).toBe('5');
     });
 
-    it('creates directories and files', async () => {
-      zenfs.mkdirSync('/project/src', { recursive: true });
-      zenfs.writeFileSync('/project/src/main.ts', 'export const x = 1;');
-      const files = zenfs.readdirSync('/project/src');
-      expect(files).toContain('main.ts');
-    });
-  });
+    it('complex workflow: zen-fs setup, bash transform, zen-fs verify', async () => {
+      zenfs.mkdirSync('/workspace/input', { recursive: true });
+      zenfs.mkdirSync('/workspace/output', { recursive: true });
+      zenfs.writeFileSync('/workspace/input/config.env', 'DB_HOST=localhost\nDB_PORT=5432\nDB_NAME=mydb');
 
-  describe('interoperability patterns', () => {
-    beforeEach(async () => {
-      await configure({ mounts: { '/': InMemory } });
-    });
+      const bash = new Bash({ fs: adapter });
 
-    it('prepares files with zen-fs, processes with just-bash', async () => {
-      zenfs.mkdirSync('/workspace', { recursive: true });
-      zenfs.writeFileSync('/workspace/input.txt', 'line1\nline2\nline3\n');
+      await bash.exec('grep DB_HOST /workspace/input/config.env | cut -d= -f2 > /workspace/output/host.txt');
+      await bash.exec('grep DB_PORT /workspace/input/config.env | cut -d= -f2 > /workspace/output/port.txt');
 
-      const bash = new Bash({
-        files: {
-          '/workspace/input.txt': zenfs.readFileSync('/workspace/input.txt', 'utf-8')
-        }
-      });
-
-      const result = await bash.exec('wc -l < /workspace/input.txt');
-      expect(result.stdout.trim()).toBe('3');
-    });
-
-    it('uses just-bash for text processing, zen-fs for storage', async () => {
-      const bash = new Bash({
-        files: { '/data/users.json': '[{"name":"Alice"},{"name":"Bob"}]' }
-      });
-
-      const result = await bash.exec('cat /data/users.json | grep -o \'"name":"[^"]*"\' | wc -l');
-      expect(result.stdout.trim()).toBe('2');
-
-      zenfs.mkdirSync('/processed', { recursive: true });
-      zenfs.writeFileSync('/processed/count.txt', result.stdout.trim());
-      expect(zenfs.readFileSync('/processed/count.txt', 'utf-8')).toBe('2');
-    });
-
-    it('combines bash scripting with zen-fs file management', async () => {
-      zenfs.mkdirSync('/scripts', { recursive: true });
-      zenfs.writeFileSync('/scripts/config.env', 'APP_NAME=myapp\nAPP_VERSION=1.0.0');
-
-      const bash = new Bash({
-        files: {
-          '/scripts/config.env': zenfs.readFileSync('/scripts/config.env', 'utf-8')
-        }
-      });
-
-      const nameResult = await bash.exec('grep APP_NAME /scripts/config.env | cut -d= -f2');
-      const versionResult = await bash.exec('grep APP_VERSION /scripts/config.env | cut -d= -f2');
-
-      expect(nameResult.stdout.trim()).toBe('myapp');
-      expect(versionResult.stdout.trim()).toBe('1.0.0');
-
-      zenfs.mkdirSync('/output', { recursive: true });
-      zenfs.writeFileSync('/output/app-info.json', JSON.stringify({
-        name: nameResult.stdout.trim(),
-        version: versionResult.stdout.trim()
-      }));
-
-      const appInfo = JSON.parse(zenfs.readFileSync('/output/app-info.json', 'utf-8'));
-      expect(appInfo.name).toBe('myapp');
-      expect(appInfo.version).toBe('1.0.0');
-    });
-  });
-
-  describe('parallel usage patterns', () => {
-    it('maintains separate filesystems for isolation', async () => {
-      await configure({ mounts: { '/': InMemory } });
-
-      const bash1 = new Bash({ files: { '/config.txt': 'env=dev' } });
-      const bash2 = new Bash({ files: { '/config.txt': 'env=prod' } });
-
-      const result1 = await bash1.exec('cat /config.txt');
-      const result2 = await bash2.exec('cat /config.txt');
-
-      expect(result1.stdout).toBe('env=dev');
-      expect(result2.stdout).toBe('env=prod');
-
-      zenfs.writeFileSync('/shared.txt', 'shared data');
-      expect(zenfs.readFileSync('/shared.txt', 'utf-8')).toBe('shared data');
+      expect(zenfs.readFileSync('/workspace/output/host.txt', 'utf-8').trim()).toBe('localhost');
+      expect(zenfs.readFileSync('/workspace/output/port.txt', 'utf-8').trim()).toBe('5432');
     });
   });
 });
