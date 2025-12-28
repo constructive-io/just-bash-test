@@ -1,8 +1,8 @@
 {
-  "name": "@pyramation/just-bash",
+  "name": "@pyramation/zen-test",
   "version": "0.0.1",
   "author": "Dan Lynch <pyramation@gmail.com>",
-  "description": "just-bash",
+  "description": "zen-fs file operations test",
   "homepage": "https://github.com/pyramation/just-bash-test",
   "license": "MIT",
   "publishConfig": {
@@ -16,13 +16,13 @@
   "bugs": {
     "url": "https://github.com/pyramation/just-bash-test/issues"
   },
-    "scripts": {
-      "lint": "eslint . --fix",
-      "test": "NODE_OPTIONS='--experimental-vm-modules' jest",
-      "test:watch": "NODE_OPTIONS='--experimental-vm-modules' jest --watchAll"
-    },
+  "scripts": {
+    "lint": "eslint . --fix",
+    "test": "NODE_OPTIONS='--experimental-vm-modules' jest",
+    "test:watch": "NODE_OPTIONS='--experimental-vm-modules' jest --watchAll"
+  },
   "keywords": [],
   "dependencies": {
-    "just-bash": "^1.0.1"
+    "@zenfs/core": "^2.4.4"
   }
 }
