@@ -5,8 +5,8 @@
 </p>
 
 <p align="center" width="100%">
-  <a href="https://github.com/pyramation/just-bash-test/actions/workflows/ci.yml">
-    <img height="20" src="https://github.com/pyramation/just-bash-test/actions/workflows/ci.yml/badge.svg" />
+  <a href="https://github.com/constructive-io/just-bash-test/actions/workflows/test.yml">
+    <img height="20" src="https://github.com/constructive-io/just-bash-test/actions/workflows/test.yml/badge.svg" />
   </a>
 </p>
 
