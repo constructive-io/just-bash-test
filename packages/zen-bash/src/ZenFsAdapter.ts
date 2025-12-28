@@ -1,185 +1,46 @@
-import { fs as zenfs } from '@zenfs/core';
-import * as path from 'path';
+import { fs } from '@zenfs/core';
+import { posix } from 'path';
 
-export interface FsStat {
-  isFile: boolean;
-  isDirectory: boolean;
-  isSymbolicLink: boolean;
-  mode: number;
-  size: number;
-  mtime: Date;
-}
-
-export interface MkdirOptions {
-  recursive?: boolean;
-}
-
-export interface RmOptions {
-  recursive?: boolean;
-  force?: boolean;
-}
-
-export interface CpOptions {
-  recursive?: boolean;
-}
-
-export interface ReadFileOptions {
-  encoding?: string | null;
-}
-
-export interface WriteFileOptions {
-  encoding?: string;
-}
-
-export type FileContent = string | Uint8Array;
+type StatLike = { isFile(): boolean; isDirectory(): boolean; isSymbolicLink(): boolean; mode: number | bigint; size: number | bigint; mtime: Date };
+const toStat = (s: StatLike) => ({
+  isFile: s.isFile(),
+  isDirectory: s.isDirectory(),
+  isSymbolicLink: s.isSymbolicLink(),
+  mode: Number(s.mode),
+  size: Number(s.size),
+  mtime: s.mtime,
+});
 
 export class ZenFsAdapter {
-  async readFile(filePath: string, options?: ReadFileOptions | string): Promise<string> {
-    const encoding = typeof options === 'string' ? options : options?.encoding ?? 'utf-8';
-    return zenfs.readFileSync(filePath, encoding as BufferEncoding);
-  }
-
-  async readFileBuffer(filePath: string): Promise<Uint8Array> {
-    const buffer = zenfs.readFileSync(filePath);
-    if (typeof buffer === 'string') {
-      return new TextEncoder().encode(buffer);
-    }
-    return new Uint8Array(buffer);
-  }
-
-  async writeFile(filePath: string, content: FileContent, options?: WriteFileOptions | string): Promise<void> {
-    this.ensureParentDirs(filePath);
-    zenfs.writeFileSync(filePath, content);
-  }
-
-  async appendFile(filePath: string, content: FileContent, options?: WriteFileOptions | string): Promise<void> {
-    this.ensureParentDirs(filePath);
-    zenfs.appendFileSync(filePath, content);
-  }
-
-  async exists(filePath: string): Promise<boolean> {
-    return zenfs.existsSync(filePath);
-  }
-
-  async stat(filePath: string): Promise<FsStat> {
-    const stats = zenfs.statSync(filePath);
-    return {
-      isFile: stats.isFile(),
-      isDirectory: stats.isDirectory(),
-      isSymbolicLink: stats.isSymbolicLink(),
-      mode: stats.mode,
-      size: stats.size,
-      mtime: stats.mtime,
-    };
-  }
-
-  async lstat(filePath: string): Promise<FsStat> {
-    const stats = zenfs.lstatSync(filePath);
-    return {
-      isFile: stats.isFile(),
-      isDirectory: stats.isDirectory(),
-      isSymbolicLink: stats.isSymbolicLink(),
-      mode: stats.mode,
-      size: stats.size,
-      mtime: stats.mtime,
-    };
-  }
-
-  async mkdir(dirPath: string, options?: MkdirOptions): Promise<void> {
-    zenfs.mkdirSync(dirPath, { recursive: options?.recursive });
-  }
-
-  async readdir(dirPath: string): Promise<string[]> {
-    return zenfs.readdirSync(dirPath) as string[];
-  }
-
-  async rm(filePath: string, options?: RmOptions): Promise<void> {
-    try {
-      zenfs.rmSync(filePath, { recursive: options?.recursive, force: options?.force });
-    } catch (e) {
-      if (!options?.force) throw e;
-    }
-  }
-
-  async cp(src: string, dest: string, options?: CpOptions): Promise<void> {
-    const srcStat = zenfs.statSync(src);
-    if (srcStat.isDirectory()) {
-      if (!options?.recursive) {
-        throw new Error(`EISDIR: is a directory, cp '${src}'`);
-      }
-      zenfs.mkdirSync(dest, { recursive: true });
-      const entries = zenfs.readdirSync(src) as string[];
-      for (const entry of entries) {
-        await this.cp(path.posix.join(src, entry), path.posix.join(dest, entry), options);
-      }
-    } else {
-      this.ensureParentDirs(dest);
-      zenfs.copyFileSync(src, dest);
-    }
-  }
-
-  async mv(src: string, dest: string): Promise<void> {
-    zenfs.renameSync(src, dest);
-  }
-
-  resolvePath(base: string, filePath: string): string {
-    if (filePath.startsWith('/')) {
-      return path.posix.normalize(filePath);
-    }
-    return path.posix.normalize(path.posix.join(base, filePath));
-  }
+  readFile = (p: string) => fs.promises.readFile(p, 'utf-8');
+  readFileBuffer = async (p: string) => new Uint8Array(await fs.promises.readFile(p));
+  writeFile = (p: string, c: string | Uint8Array) => fs.promises.writeFile(p, c);
+  appendFile = (p: string, c: string | Uint8Array) => fs.promises.appendFile(p, c);
+  exists = (p: string) => fs.promises.exists(p);
+  mkdir = async (p: string, o?: { recursive?: boolean }) => { await fs.promises.mkdir(p, o); };
+  readdir = (p: string) => fs.promises.readdir(p) as Promise<string[]>;
+  rm = (p: string, o?: { recursive?: boolean; force?: boolean }) => fs.promises.rm(p, o);
+  cp = (s: string, d: string, o?: { recursive?: boolean }) => fs.promises.cp(s, d, o);
+  mv = async (s: string, d: string) => { await fs.promises.rename(s, d); };
+  chmod = (p: string, m: number) => fs.promises.chmod(p, m);
+  symlink = (t: string, l: string) => fs.promises.symlink(t, l);
+  link = (e: string, n: string) => fs.promises.link(e, n);
+  readlink = (p: string) => fs.promises.readlink(p);
+  stat = async (p: string) => toStat(await fs.promises.stat(p));
+  lstat = async (p: string) => toStat(await fs.promises.lstat(p));
+  resolvePath = (base: string, p: string) => posix.normalize(p.startsWith('/') ? p : posix.join(base, p));
 
   getAllPaths(): string[] {
-    const paths: string[] = [];
-    this.walkDir('/', paths);
-    return paths;
-  }
-
-  private walkDir(dir: string, paths: string[]): void {
-    paths.push(dir);
-    try {
-      const entries = zenfs.readdirSync(dir) as string[];
-      for (const entry of entries) {
-        const fullPath = dir === '/' ? `/${entry}` : `${dir}/${entry}`;
-        try {
-          const stats = zenfs.lstatSync(fullPath);
-          if (stats.isDirectory()) {
-            this.walkDir(fullPath, paths);
-          } else {
-            paths.push(fullPath);
-          }
-        } catch {
-          paths.push(fullPath);
+    const walk = (dir: string): string[] => {
+      const paths = [dir];
+      try {
+        for (const e of fs.readdirSync(dir)) {
+          const full = dir === '/' ? `/${e}` : `${dir}/${e}`;
+          paths.push(...(fs.lstatSync(full).isDirectory() ? walk(full) : [full]));
         }
-      }
-    } catch {
-      // Directory not readable, skip
-    }
-  }
-
-  async chmod(filePath: string, mode: number): Promise<void> {
-    zenfs.chmodSync(filePath, mode);
-  }
-
-  async symlink(target: string, linkPath: string): Promise<void> {
-    this.ensureParentDirs(linkPath);
-    zenfs.symlinkSync(target, linkPath);
-  }
-
-  async link(existingPath: string, newPath: string): Promise<void> {
-    this.ensureParentDirs(newPath);
-    zenfs.linkSync(existingPath, newPath);
-  }
-
-  async readlink(linkPath: string): Promise<string> {
-    const result = zenfs.readlinkSync(linkPath);
-    return typeof result === 'string' ? result : result.toString('utf-8');
-  }
-
-  private ensureParentDirs(filePath: string): void {
-    const dir = path.posix.dirname(filePath);
-    if (dir && dir !== '/' && !zenfs.existsSync(dir)) {
-      zenfs.mkdirSync(dir, { recursive: true });
-    }
+      } catch { /* skip unreadable */ }
+      return paths;
+    };
+    return walk('/');
   }
 }
