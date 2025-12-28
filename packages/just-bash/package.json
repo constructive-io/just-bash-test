@@ -1,0 +1,28 @@
+{
+  "name": "@pyramation/just-bash",
+  "version": "0.0.1",
+  "author": "Dan Lynch <pyramation@gmail.com>",
+  "description": "just-bash",
+  "homepage": "https://github.com/pyramation/just-bash-test",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public",
+    "directory": "dist"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pyramation/just-bash-test"
+  },
+  "bugs": {
+    "url": "https://github.com/pyramation/just-bash-test/issues"
+  },
+  "scripts": {
+    "lint": "eslint . --fix",
+    "test": "jest",
+    "test:watch": "jest --watchAll"
+  },
+  "keywords": [],
+  "dependencies": {
+    "just-bash": "^1.0.1"
+  }
+}
